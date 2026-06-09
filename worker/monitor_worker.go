@@ -48,8 +48,8 @@ func (w *MonitorWorker) TriggerCheck(domainID int, domainName string) {
 func (w *MonitorWorker) StartWhoisWorker(ctx context.Context, interval time.Duration) {
 	log.Println("🔄 WHOIS Worker запущен (интервал:", interval, ")")
 
-	// Первый запуск сразу
-	w.runWhoisScan(ctx)
+	// Первый запуск сразу (в горутине, чтобы не блокировать select-loop)
+	go w.runWhoisScan(ctx)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -60,17 +60,21 @@ func (w *MonitorWorker) StartWhoisWorker(ctx context.Context, interval time.Dura
 			log.Println("⏹️  WHOIS Worker остановлен")
 			return
 		case <-ticker.C:
-			w.runWhoisScan(ctx)
+			// Периодический скан в горутине, чтобы не блокировать обработку checkCh
+			go w.runWhoisScan(ctx)
 		case req := <-w.checkCh:
-			// Немедленная проверка нового домена
-			log.Printf("⚡ Немедленная WHOIS-проверка для %s", req.DomainName)
-			if err := w.whoisSvc.FetchAndSave(ctx, req.DomainID, req.DomainName); err != nil {
-				log.Printf("❌ WHOIS error for %s: %v", req.DomainName, err)
-			}
-			// Также проверяем статус сразу
-			if err := w.monitorSvc.CheckDomain(ctx, req.DomainID, req.DomainName); err != nil {
-				log.Printf("❌ Status error for %s: %v", req.DomainName, err)
-			}
+			// Немедленная проверка нового домена — в горутине для быстрого возврата
+			go func(r CheckRequest) {
+				log.Printf("⚡ Немедленная WHOIS-проверка для %s", r.DomainName)
+				if err := w.whoisSvc.FetchAndSave(ctx, r.DomainID, r.DomainName); err != nil {
+					log.Printf("❌ WHOIS error for %s: %v", r.DomainName, err)
+				}
+				// Также проверяем статус сразу
+				if err := w.monitorSvc.CheckDomain(ctx, r.DomainID, r.DomainName); err != nil {
+					log.Printf("❌ Status error for %s: %v", r.DomainName, err)
+				}
+				log.Printf("✅ Немедленная проверка %s завершена", r.DomainName)
+			}(req)
 		}
 	}
 }
@@ -79,8 +83,8 @@ func (w *MonitorWorker) StartWhoisWorker(ctx context.Context, interval time.Dura
 func (w *MonitorWorker) StartStatusWorker(ctx context.Context, interval time.Duration) {
 	log.Println("🔄 Status Worker запущен (интервал:", interval, ")")
 
-	// Первый запуск сразу
-	w.runStatusCheck(ctx)
+	// Первый запуск сразу (в горутине)
+	go w.runStatusCheck(ctx)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -91,7 +95,7 @@ func (w *MonitorWorker) StartStatusWorker(ctx context.Context, interval time.Dur
 			log.Println("⏹️  Status Worker остановлен")
 			return
 		case <-ticker.C:
-			w.runStatusCheck(ctx)
+			go w.runStatusCheck(ctx)
 		}
 	}
 }
