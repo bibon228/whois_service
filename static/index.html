@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="WHOIS Service — мониторинг доменов, проверка доступности и WHOIS-данные в режиме реального времени">
+    <title>WHOIS Service — Мониторинг доменов</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Навигация -->
+    <nav class="navbar">
+        <div class="container">
+            <a href="/" class="navbar-brand">
+                <div class="logo-icon">🌐</div>
+                WHOIS Service
+            </a>
+            <div class="navbar-links" id="navLinks">
+                <a href="/" class="nav-link active">Домены</a>
+                <a href="/login" class="nav-link" id="loginLink">Войти</a>
+                <a href="/admin" class="nav-link" id="adminLink" style="display:none;">Админ</a>
+                <button class="btn btn-sm btn-outline" id="logoutBtn" style="display:none;" onclick="logout()">Выйти</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero fade-in">
+        <div class="container">
+            <h1>Мониторинг доменов</h1>
+            <p>Отслеживайте доступность, WHOIS-данные и срок действия ваших доменов в реальном времени</p>
+        </div>
+    </section>
+
+    <!-- Статистика -->
+    <div class="container">
+        <div class="stats-bar fade-in fade-in-delay-1">
+            <div class="stat-card">
+                <div class="stat-value" id="totalDomains">—</div>
+                <div class="stat-label">Всего доменов</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value online" id="onlineDomains">—</div>
+                <div class="stat-label">Онлайн</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value offline" id="offlineDomains">—</div>
+                <div class="stat-label">Оффлайн</div>
+            </div>
+        </div>
+
+        <!-- Поиск -->
+        <div class="search-container fade-in fade-in-delay-2">
+            <span class="search-icon">🔍</span>
+            <input type="text" class="search-input" id="searchInput" placeholder="Поиск домена..." oninput="filterDomains()">
+        </div>
+
+        <!-- Сетка доменов -->
+        <div class="domains-grid fade-in fade-in-delay-3" id="domainsGrid">
+            <div class="spinner"></div>
+            <p class="loading-text">Загрузка доменов...</p>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        let allDomains = [];
+
+        async function loadDomains() {
+            try {
+                const resp = await fetch('/api/domains');
+                allDomains = await resp.json();
+                if (!allDomains || allDomains.length === 0) {
+                    allDomains = [];
+                }
+                renderDomains(allDomains);
+                updateStats(allDomains);
+            } catch (e) {
+                document.getElementById('domainsGrid').innerHTML =
+                    '<div class="empty-state"><div class="icon">⚠️</div><p>Не удалось загрузить домены</p></div>';
+            }
+        }
+
+        function updateStats(domains) {
+            const online = domains.filter(d => d.is_online === true).length;
+            const offline = domains.filter(d => d.is_online === false).length;
+            document.getElementById('totalDomains').textContent = domains.length;
+            document.getElementById('onlineDomains').textContent = online;
+            document.getElementById('offlineDomains').textContent = domains.length - online;
+        }
+
+        function renderDomains(domains) {
+            const grid = document.getElementById('domainsGrid');
+            if (domains.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><div class="icon">🌐</div><p>Нет отслеживаемых доменов</p></div>';
+                return;
+            }
+            grid.innerHTML = domains.map(d => {
+                const statusClass = d.is_online === true ? 'online' : (d.is_online === false ? 'offline' : 'unknown');
+                const statusText = d.is_online === true ? 'Online' : (d.is_online === false ? 'Offline' : 'Неизвестно');
+                const responseTime = d.response_time_ms ? d.response_time_ms + 'ms' : '—';
+                const ip = d.ip_address || '—';
+                const registrar = d.registrar || '—';
+                const expiry = d.expiry_date ? new Date(d.expiry_date).toLocaleDateString('ru-RU') : '—';
+                return `
+                    <div class="domain-card" onclick="window.location.href='/domain/${d.name}'">
+                        <div class="domain-card-header">
+                            <div class="domain-name">
+                                <span class="status-dot ${statusClass}"></span>
+                                ${d.name}
+                            </div>
+                            <span class="status-badge ${statusClass}">${statusText}</span>
+                        </div>
+                        <div class="domain-card-info">
+                            <div class="info-item">
+                                <span class="info-label">IP-адрес</span>
+                                <span class="info-value">${ip}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Отклик</span>
+                                <span class="info-value">${responseTime}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Регистратор</span>
+                                <span class="info-value">${registrar}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Истекает</span>
+                                <span class="info-value">${expiry}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterDomains() {
+            const q = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = allDomains.filter(d => d.name.toLowerCase().includes(q));
+            renderDomains(filtered);
+        }
+
+        checkAuth();
+        loadDomains();
+        // Автообновление каждые 30 секунд
+        setInterval(loadDomains, 30000);
+    </script>
+</body>
+</html>

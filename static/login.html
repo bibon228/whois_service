@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход — WHOIS Service</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="auth-page">
+        <div class="auth-card fade-in">
+            <h2>👋 Добро пожаловать</h2>
+            <p class="subtitle">Войдите в аккаунт для доступа к панели</p>
+
+            <div class="error-message" id="errorMsg"></div>
+
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="username">Имя пользователя</label>
+                    <input type="text" class="form-input" id="username" placeholder="admin" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Пароль</label>
+                    <input type="password" class="form-input" id="password" placeholder="••••••" required>
+                </div>
+                <button type="submit" class="btn btn-primary" id="submitBtn">Войти</button>
+            </form>
+
+            <div class="auth-link">
+                Нет аккаунта? <a href="/register">Зарегистрироваться</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        async function handleLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            const errorMsg = document.getElementById('errorMsg');
+            btn.textContent = 'Входим...';
+            btn.disabled = true;
+            errorMsg.style.display = 'none';
+
+            try {
+                const resp = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        username: document.getElementById('username').value,
+                        password: document.getElementById('password').value
+                    })
+                });
+
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    throw new Error(data.error || 'Ошибка входа');
+                }
+
+                // Токен теперь приходит в HttpOnly cookie автоматически
+                localStorage.setItem('user', JSON.stringify(data.user));
+                window.location.href = data.user.role === 'admin' ? '/admin' : '/';
+            } catch (err) {
+                errorMsg.textContent = err.message;
+                errorMsg.style.display = 'block';
+                btn.textContent = 'Войти';
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

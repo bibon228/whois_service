@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Домен — WHOIS Service</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <a href="/" class="navbar-brand">
+                <div class="logo-icon">🌐</div>
+                WHOIS Service
+            </a>
+            <div class="navbar-links" id="navLinks">
+                <a href="/" class="nav-link">Домены</a>
+                <a href="/login" class="nav-link" id="loginLink">Войти</a>
+                <a href="/admin" class="nav-link" id="adminLink" style="display:none;">Админ</a>
+                <button class="btn btn-sm btn-outline" id="logoutBtn" style="display:none;" onclick="logout()">Выйти</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <a href="/" class="back-link">← Назад к списку</a>
+
+        <div id="domainContent">
+            <div class="spinner"></div>
+            <p class="loading-text">Загрузка информации о домене...</p>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        const domainName = window.location.pathname.split('/domain/')[1];
+
+        async function loadDomain() {
+            try {
+                const [domainResp, whoisResp, statusResp] = await Promise.all([
+                    fetch('/api/domains/' + domainName),
+                    fetch('/api/domains/' + domainName + '/whois'),
+                    fetch('/api/domains/' + domainName + '/status')
+                ]);
+
+                const domain = await domainResp.json();
+                const whois = whoisResp.ok ? await whoisResp.json() : null;
+                const statusHistory = statusResp.ok ? await statusResp.json() : [];
+
+                if (domain.error) {
+                    document.getElementById('domainContent').innerHTML =
+                        '<div class="empty-state"><div class="icon">❌</div><p>Домен не найден</p></div>';
+                    return;
+                }
+
+                renderDomain(domain, whois, statusHistory);
+            } catch (e) {
+                document.getElementById('domainContent').innerHTML =
+                    '<div class="empty-state"><div class="icon">⚠️</div><p>Ошибка загрузки</p></div>';
+            }
+        }
+
+        function renderDomain(d, whois, history) {
+            const statusClass = d.is_online === true ? 'online' : (d.is_online === false ? 'offline' : 'unknown');
+            const statusText = d.is_online === true ? 'Online' : (d.is_online === false ? 'Offline' : 'Неизвестно');
+
+            const ip = d.ip_address || whois?.ip_address || '—';
+            const registrar = d.registrar || whois?.registrar || '—';
+            const registrant = whois?.registrant || '—';
+            const nameServers = whois?.name_servers || '—';
+            const createdDate = whois?.created_date ? new Date(whois.created_date).toLocaleDateString('ru-RU') : '—';
+            const expiryDate = d.expiry_date ? new Date(d.expiry_date).toLocaleDateString('ru-RU') : '—';
+            const responseTime = d.response_time_ms ? d.response_time_ms + 'ms' : '—';
+            const rawWhois = whois?.raw_whois || 'WHOIS-данные ещё не загружены. Дождитесь первого обновления воркера.';
+            // SSL данные
+            const sslIssuer = whois?.ssl_issuer || '—';
+            const sslSubject = whois?.ssl_subject || '—';
+            const sslExpiry = whois?.ssl_expiry ? new Date(whois.ssl_expiry).toLocaleDateString('ru-RU') : '—';
+            const serverInfo = whois?.server_info || '—';
+
+            document.title = d.name + ' — WHOIS Service';
+
+            document.getElementById('domainContent').innerHTML = `
+                <div class="domain-header fade-in">
+                    <h1>${d.name}</h1>
+                    <span class="status-badge ${statusClass}">${statusText}</span>
+                </div>
+
+                <div class="info-cards fade-in fade-in-delay-1">
+                    <div class="info-card">
+                        <div class="info-label">IP-адрес</div>
+                        <div class="info-value">${ip}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Время отклика</div>
+                        <div class="info-value">${responseTime}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Регистратор</div>
+                        <div class="info-value">${registrar}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Владелец</div>
+                        <div class="info-value">${registrant}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Создан</div>
+                        <div class="info-value">${createdDate}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">Истекает</div>
+                        <div class="info-value">${expiryDate}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">🔒 SSL выдан</div>
+                        <div class="info-value">${sslIssuer}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">🔒 SSL для</div>
+                        <div class="info-value">${sslSubject}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">🔒 SSL до</div>
+                        <div class="info-value">${sslExpiry}</div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">⚙️ Сервер</div>
+                        <div class="info-value">${serverInfo}</div>
+                    </div>
+                    <div class="info-card" style="grid-column: span 2">
+                        <div class="info-label">DNS-серверы</div>
+                        <div class="info-value" style="font-size:0.8rem">${nameServers}</div>
+                    </div>
+                </div>
+
+                ${history && history.length > 0 ? `
+                <div class="chart-container fade-in fade-in-delay-2">
+                    <h3>📊 История доступности</h3>
+                    <canvas class="chart-canvas" id="statusChart"></canvas>
+                </div>` : ''}
+
+                <div class="whois-block fade-in fade-in-delay-3">
+                    <div class="whois-header">
+                        <div class="dot red"></div>
+                        <div class="dot yellow"></div>
+                        <div class="dot green"></div>
+                        <span>whois ${d.name}</span>
+                    </div>
+                    <div class="whois-content">${escapeHtml(rawWhois)}</div>
+                </div>
+
+                ${history && history.length > 0 ? `
+                <div class="chart-container">
+                    <h3>📋 Последние проверки</h3>
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>Статус</th>
+                                <th>HTTP</th>
+                                <th>Отклик</th>
+                                <th>Время</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${history.slice(0, 20).map(h => `
+                                <tr>
+                                    <td><span class="status-dot ${h.is_online ? 'online' : 'offline'}"></span> ${h.is_online ? 'Online' : 'Offline'}</td>
+                                    <td>${h.http_status || '—'}</td>
+                                    <td>${h.response_time_ms}ms</td>
+                                    <td>${new Date(h.checked_at).toLocaleString('ru-RU')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>` : ''}
+            `;
+
+            // Рисуем график если есть данные
+            if (history && history.length > 0) {
+                setTimeout(() => drawChart(history.reverse()), 100);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function drawChart(history) {
+            const canvas = document.getElementById('statusChart');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+
+            // Retina support
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * 2;
+            canvas.height = rect.height * 2;
+            ctx.scale(2, 2);
+            const W = rect.width;
+            const H = rect.height;
+
+            const padding = { top: 20, right: 20, bottom: 30, left: 50 };
+            const chartW = W - padding.left - padding.right;
+            const chartH = H - padding.top - padding.bottom;
+
+            // Find max response time
+            const maxRT = Math.max(...history.map(h => h.response_time_ms), 100);
+
+            // Draw grid
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = padding.top + (chartH / 4) * i;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(W - padding.right, y);
+                ctx.stroke();
+
+                ctx.fillStyle = '#64748B';
+                ctx.font = '11px Inter';
+                ctx.textAlign = 'right';
+                ctx.fillText(Math.round(maxRT - (maxRT / 4) * i) + 'ms', padding.left - 8, y + 4);
+            }
+
+            if (history.length < 2) return;
+
+            // Draw response time line
+            const gradient = ctx.createLinearGradient(0, padding.top, 0, H - padding.bottom);
+            gradient.addColorStop(0, 'rgba(124, 58, 237, 0.6)');
+            gradient.addColorStop(1, 'rgba(37, 99, 235, 0.1)');
+
+            // Fill area
+            ctx.beginPath();
+            ctx.moveTo(padding.left, padding.top + chartH);
+            history.forEach((h, i) => {
+                const x = padding.left + (i / (history.length - 1)) * chartW;
+                const y = padding.top + chartH - (h.response_time_ms / maxRT) * chartH;
+                ctx.lineTo(x, y);
+            });
+            ctx.lineTo(padding.left + chartW, padding.top + chartH);
+            ctx.closePath();
+            ctx.fillStyle = gradient;
+            ctx.fill();
+
+            // Draw line
+            ctx.beginPath();
+            ctx.strokeStyle = '#7C3AED';
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+            history.forEach((h, i) => {
+                const x = padding.left + (i / (history.length - 1)) * chartW;
+                const y = padding.top + chartH - (h.response_time_ms / maxRT) * chartH;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            // Draw dots with status colors
+            history.forEach((h, i) => {
+                const x = padding.left + (i / (history.length - 1)) * chartW;
+                const y = padding.top + chartH - (h.response_time_ms / maxRT) * chartH;
+                ctx.beginPath();
+                ctx.arc(x, y, 3, 0, Math.PI * 2);
+                ctx.fillStyle = h.is_online ? '#10B981' : '#EF4444';
+                ctx.fill();
+            });
+        }
+
+        checkAuth();
+        loadDomain();
+    </script>
+</body>
+</html>

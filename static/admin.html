@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ-панель — WHOIS Service</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <a href="/" class="navbar-brand">
+                <div class="logo-icon">🌐</div>
+                WHOIS Service
+            </a>
+            <div class="navbar-links">
+                <a href="/" class="nav-link">Домены</a>
+                <a href="/admin" class="nav-link active">Админ</a>
+                <button class="btn btn-sm btn-outline" onclick="logout()">Выйти</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="admin-header fade-in">
+            <h1>⚡ Панель администратора</h1>
+            <button class="btn btn-primary" onclick="showAddModal()">+ Добавить домен</button>
+        </div>
+
+        <!-- Статистика -->
+        <div class="admin-stats fade-in fade-in-delay-1" id="adminStats">
+            <div class="admin-stat-card">
+                <div class="stat-icon">🌍</div>
+                <div class="stat-value" id="statTotal">—</div>
+                <div class="stat-label">Всего доменов</div>
+            </div>
+            <div class="admin-stat-card">
+                <div class="stat-icon">🟢</div>
+                <div class="stat-value online" id="statOnline">—</div>
+                <div class="stat-label">Онлайн</div>
+            </div>
+            <div class="admin-stat-card">
+                <div class="stat-icon">🔴</div>
+                <div class="stat-value offline" id="statOffline">—</div>
+                <div class="stat-label">Оффлайн</div>
+            </div>
+        </div>
+
+        <!-- Предупреждения -->
+        <div class="warning-section" id="warningSection" style="display:none;">
+            <h3>⚠️ Скоро истекает</h3>
+            <div id="warningList"></div>
+        </div>
+
+        <!-- Таблица доменов -->
+        <div class="table-container fade-in fade-in-delay-2">
+            <div class="table-header">
+                <h3>Управление доменами</h3>
+            </div>
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Домен</th>
+                        <th>Статус</th>
+                        <th>Активен</th>
+                        <th>Добавлен</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody id="domainsTable">
+                    <tr><td colspan="6" style="text-align:center;padding:40px;"><div class="spinner"></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Модальное окно добавления -->
+    <div class="modal-overlay" id="addModal">
+        <div class="modal">
+            <h3>Добавить домен</h3>
+            <form onsubmit="addDomain(event)">
+                <div class="form-group">
+                    <label>Имя домена</label>
+                    <input type="text" class="form-input" id="newDomainName" placeholder="example.com" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-outline" onclick="hideModal('addModal')">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Добавить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="/static/js/app.js"></script>
+    <script>
+        // Заголовки для авторизованных запросов (cookie отправляются автоматически)
+        function authHeaders() {
+            return {
+                'Content-Type': 'application/json'
+            };
+        }
+
+        // Проверяем, что пользователь - админ
+        (function() {
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            if (!user.username || user.role !== 'admin') {
+                window.location.href = '/login';
+            }
+        })();
+
+        async function loadAdminData() {
+            try {
+                // Параллельная загрузка статистики и доменов
+                const [statsResp, domainsResp] = await Promise.all([
+                    fetch('/api/admin/stats', { headers: authHeaders(), credentials: 'same-origin' }),
+                    fetch('/api/domains')
+                ]);
+
+                if (statsResp.status === 401 || statsResp.status === 403) {
+                    window.location.href = '/login';
+                    return;
+                }
+
+                const stats = await statsResp.json();
+                const domains = await domainsResp.json();
+
+                // Обновляем статистику
+                document.getElementById('statTotal').textContent = stats.total_domains;
+                document.getElementById('statOnline').textContent = stats.online_domains;
+                document.getElementById('statOffline').textContent = stats.offline_domains;
+
+                // Предупреждения
+                if (stats.expiring_soon && stats.expiring_soon.length > 0) {
+                    document.getElementById('warningSection').style.display = 'block';
+                    document.getElementById('warningList').innerHTML = stats.expiring_soon.map(d => `
+                        <div class="warning-card">
+                            <span class="domain-name">${d.name}</span>
+                            <span class="expiry-info">Истекает: ${d.expiry_date ? new Date(d.expiry_date).toLocaleDateString('ru-RU') : '—'}</span>
+                        </div>
+                    `).join('');
+                }
+
+                // Таблица доменов
+                renderDomainsTable(domains || []);
+            } catch (e) {
+                console.error('Error loading admin data:', e);
+            }
+        }
+
+        function renderDomainsTable(domains) {
+            const tbody = document.getElementById('domainsTable');
+            if (domains.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><p>Нет доменов</p></div></td></tr>';
+                return;
+            }
+            tbody.innerHTML = domains.map(d => {
+                const statusClass = d.is_online === true ? 'online' : (d.is_online === false ? 'offline' : 'unknown');
+                return `
+                    <tr>
+                        <td>${d.id}</td>
+                        <td><strong>${d.name}</strong></td>
+                        <td><span class="status-dot ${statusClass}"></span></td>
+                        <td>${d.is_active ? '✅' : '❌'}</td>
+                        <td>${new Date(d.created_at).toLocaleDateString('ru-RU')}</td>
+                        <td class="actions">
+                            <button class="btn btn-sm btn-outline" onclick="refreshDomain(${d.id})" title="Обновить WHOIS">🔄</button>
+                            <button class="btn btn-sm btn-outline" onclick="toggleActive(${d.id}, '${d.name}', ${!d.is_active})" title="Вкл/Выкл">${d.is_active ? '⏸️' : '▶️'}</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteDomain(${d.id}, '${d.name}')">🗑️</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function showAddModal() {
+            document.getElementById('addModal').classList.add('active');
+        }
+
+        function hideModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        async function addDomain(e) {
+            e.preventDefault();
+            const name = document.getElementById('newDomainName').value.trim();
+            try {
+                const resp = await fetch('/api/admin/domains', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ name })
+                });
+                if (!resp.ok) {
+                    const data = await resp.json();
+                    throw new Error(data.error);
+                }
+                hideModal('addModal');
+                document.getElementById('newDomainName').value = '';
+                showToast('Домен ' + name + ' добавлен!', 'success');
+                loadAdminData();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function deleteDomain(id, name) {
+            if (!confirm('Удалить домен ' + name + '?')) return;
+            try {
+                const resp = await fetch('/api/admin/domains/' + id, {
+                    method: 'DELETE',
+                    headers: authHeaders(),
+                    credentials: 'same-origin'
+                });
+                if (!resp.ok) throw new Error('Ошибка удаления');
+                showToast(name + ' удалён', 'success');
+                loadAdminData();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function refreshDomain(id) {
+            try {
+                const resp = await fetch('/api/admin/domains/' + id + '/refresh', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    credentials: 'same-origin'
+                });
+                if (!resp.ok) throw new Error('Ошибка обновления');
+                showToast('WHOIS обновление запущено', 'success');
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        async function toggleActive(id, name, isActive) {
+            try {
+                const resp = await fetch('/api/admin/domains/' + id, {
+                    method: 'PUT',
+                    headers: authHeaders(),
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ name, is_active: isActive })
+                });
+                if (!resp.ok) throw new Error('Ошибка обновления');
+                showToast(name + (isActive ? ' активирован' : ' деактивирован'), 'success');
+                loadAdminData();
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        // Закрытие модалки по клику вне
+        document.getElementById('addModal').addEventListener('click', function(e) {
+            if (e.target === this) hideModal('addModal');
+        });
+
+        loadAdminData();
+        setInterval(loadAdminData, 30000);
+    </script>
+</body>
+</html>
