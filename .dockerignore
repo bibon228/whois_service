@@ -1,0 +1,12 @@
+.git
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+whois_service.exe
+Dockerfile
+docker-compose.yml
+.dockerignore
+.gitignore
+README.md
